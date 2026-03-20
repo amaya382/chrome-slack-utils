@@ -18,7 +18,7 @@ Shows a rendered preview of your message before sending. Press Enter once to pre
 
 Toggle this feature on/off from the extension popup.
 
-<img src="./img/preview.png" width="65%">
+<img src="./img/preview.png" width="60%">
 
 
 ## Installation
