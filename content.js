@@ -158,7 +158,7 @@
 
     items.forEach((li) => {
       const indent = parseInt(li.getAttribute("data-stringify-indent") || "0");
-      const prefix = "  ".repeat(indent);
+      const prefix = "    ".repeat(indent);
       const content = convertChildren(li).trim();
 
       if (type === "ul") {
