@@ -2,7 +2,7 @@
 chrome.runtime.onInstalled.addListener(() => {
   chrome.contextMenus.create({
     id: "copy_selection_as_markdown",
-    title: "Copy selected message as Markdown",
+    title: "Copy selected as Markdown",
     contexts: ["selection"],
     documentUrlPatterns: ["https://app.slack.com/*"],
   });
