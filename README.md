@@ -10,7 +10,7 @@ Adds "Copy message as Markdown" and "Copy message as Markdown" options to Slack'
 
 Also available via the browser's right-click context menu when text is selected.
 
-![](./img/copy-message-as-markdown.png)
+<img src="./img/copy-message-as-markdown.png" width="65%">
 
 ### Send Preview
 
@@ -18,7 +18,8 @@ Shows a rendered preview of your message before sending. Press Enter once to pre
 
 Toggle this feature on/off from the extension popup.
 
-![](./img/preview.png)
+<img src="./img/preview.png" width="65%">
+
 
 ## Installation
 
