@@ -870,6 +870,14 @@
     sendConfirmState.delete(composer);
   }
 
+  // Detect if an autocomplete popup (mentions, channels, emoji, slash
+  // commands) is open. All Slack autocomplete popups share the attribute
+  // data-qa="texty_autocomplete_menu" and are rendered inside a
+  // ReactModal popover.
+  function isAutocompleteOpen() {
+    return !!document.querySelector('[data-qa="texty_autocomplete_menu"]');
+  }
+
   function handleSendConfirmKeyDown(e) {
     // Handle Escape to disarm
     if (e.key === "Escape") {
@@ -891,6 +899,9 @@
       if (!editor) return;
       const composer = findComposer(editor);
       if (!composer) return;
+
+      // Skip when an autocomplete popup is open (emoji, mention, channel)
+      if (isAutocompleteOpen()) return;
 
       // Skip edit mode
       if (isEditMode(composer)) return;
