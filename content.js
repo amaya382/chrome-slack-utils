@@ -561,7 +561,7 @@
 
   // Render Slack-flavored Markdown text to HTML matching Slack's actual
   // rendered message structure (see reference/redered.html).
-  function renderSlackMarkdown(text) {
+  function renderSlackMarkdown(text, editorEl) {
     const esc = (s) =>
       s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
@@ -615,13 +615,13 @@
 
       // Unordered list (- item or • item)
       if (/^(\s*)[-•*] /.test(line)) {
-        parts.push(parseList(lines, "unordered"));
+        parts.push(parseList(lines));
         continue;
       }
 
       // Ordered list (1. item)
       if (/^(\s*)\d+\. /.test(line)) {
-        parts.push(parseList(lines, "ordered"));
+        parts.push(parseList(lines));
         continue;
       }
 
@@ -655,77 +655,95 @@
       "</div></div></div></div></div>"
     );
 
-    // Parse a list block (unordered or ordered) with nesting support
-    function parseList(allLines, type) {
-      const tag = type === "unordered" ? "ul" : "ol";
-      const pattern =
-        type === "unordered" ? /^(\s*)[-•*] (.*)$/ : /^(\s*)\d+\. (.*)$/;
-      const testPattern =
-        type === "unordered" ? /^(\s*)[-•*] / : /^(\s*)\d+\. /;
-      const typeAttr =
-        type === "unordered" ? "unordered-list" : "ordered-list";
-      const cssClass =
-        type === "unordered"
-          ? "p-rich_text_list__bullet"
-          : "p-rich_text_list__ordered";
+    // Parse a list block (unordered or ordered) with nesting support.
+    // Mixed ol/ul nesting is handled by collecting any list line deeper than
+    // the current indent and recording each item's own type.
+    function parseList(allLines) {
+      const ulTest = /^(\s*)[-•*] /;
+      const olTest = /^(\s*)\d+\. /;
 
-      // Collect all items with their indent levels
+      function lineType(line) {
+        if (ulTest.test(line)) return "unordered";
+        if (olTest.test(line)) return "ordered";
+        return null;
+      }
+
+      function lineIndent(line) {
+        return Math.floor(line.match(/^(\s*)/)[1].length / 2);
+      }
+
+      function lineContent(line, t) {
+        return t === "unordered"
+          ? line.match(/^(\s*)[-•*] (.*)$/)[2]
+          : line.match(/^(\s*)\d+\. (.*)$/)[2];
+      }
+
+      // Collect all contiguous list lines (any type, any indent)
+      const baseIndent = lineIndent(allLines[i]);
       const items = [];
-      while (i < allLines.length && testPattern.test(allLines[i])) {
-        const match = allLines[i].match(pattern);
-        const indent = Math.floor(match[1].length / 2);
-        items.push({ indent, content: match[2] });
+      while (i < allLines.length) {
+        const lt = lineType(allLines[i]);
+        if (!lt) break;
+        // Stop if we return to a shallower indent than the block started at
+        if (lineIndent(allLines[i]) < baseIndent) break;
+        items.push({
+          indent: lineIndent(allLines[i]),
+          type: lt,
+          content: lineContent(allLines[i], lt),
+        });
         i++;
       }
 
-      return buildNestedList(items, 0, tag, typeAttr, cssClass);
+      return buildNestedList(items, 0);
     }
 
-    function buildNestedList(items, baseIndent, tag, typeAttr, cssClass) {
-      let html =
-        "<" +
-        tag +
-        ' data-stringify-type="' +
-        typeAttr +
-        '" data-list-tree="true"' +
-        ' class="p-rich_text_list ' +
-        cssClass +
-        ' p-rich_text_list--nested"' +
-        ' data-indent="' +
-        baseIndent +
-        '" data-border="0">';
+    function buildNestedList(items, startIdx) {
+      // Determine the tag/attrs from the first item at this level
+      const firstItem = items[startIdx];
+      const tag = firstItem.type === "unordered" ? "ul" : "ol";
+      const typeAttr =
+        firstItem.type === "unordered" ? "unordered-list" : "ordered-list";
+      const cssClass =
+        firstItem.type === "unordered"
+          ? "p-rich_text_list__bullet"
+          : "p-rich_text_list__ordered";
+      const baseIndent = firstItem.indent;
 
-      let j = 0;
+      let html =
+        `<${tag} data-stringify-type="${typeAttr}" data-list-tree="true"` +
+        ` class="p-rich_text_list ${cssClass} p-rich_text_list--nested"` +
+        ` data-indent="${baseIndent}" data-border="0">`;
+
+      let j = startIdx;
       while (j < items.length) {
         const item = items[j];
         if (item.indent < baseIndent) break;
+        if (item.indent > baseIndent) {
+          // Belongs to a child group — skip (handled recursively below)
+          j++;
+          continue;
+        }
 
         html +=
-          '<li data-stringify-indent="' +
-          item.indent +
-          '" data-stringify-border="0">' +
+          `<li data-stringify-indent="${item.indent}" data-stringify-border="0">` +
           inlineFormat(esc(item.content));
 
-        // Check for child items at deeper indent
-        const childItems = [];
-        j++;
-        while (j < items.length && items[j].indent > item.indent) {
-          childItems.push(items[j]);
+        // Collect child items (deeper indent)
+        const childStart = j + 1;
+        if (childStart < items.length && items[childStart].indent > item.indent) {
+          // Find extent of this child group
+          let k = childStart;
+          while (k < items.length && items[k].indent > item.indent) k++;
+          html += buildNestedList(items, childStart, item.type);
+          j = k;
+        } else {
           j++;
         }
-        if (childItems.length > 0) {
-          html += buildNestedList(
-            childItems,
-            item.indent + 1,
-            tag,
-            typeAttr,
-            cssClass
-          );
-        }
+
         html += "</li>";
       }
 
-      html += "</" + tag + ">";
+      html += `</${tag}>`;
       return html;
     }
 
@@ -770,6 +788,27 @@
         /(?<![="'\w])(https?:\/\/[^\s<]+)/g,
         '<a target="_blank" class="c-link" data-stringify-link="$1" href="$1" rel="noopener noreferrer">$1</a>'
       );
+      // Emoji: :emoji_name: — must run last so generated HTML is not re-processed
+      s = s.replace(/:([a-z0-9_+\-]+):/g, (match, name) => {
+        const scope = editorEl || document;
+        const editorImg = scope.querySelector(
+          `img.emoji[data-id=":${name}:"], img.emoji[data-stringify-text=":${name}:"]`
+        );
+        const bgUrl = editorImg
+          ? (editorImg.style.backgroundImage.match(/url\(["']?([^"')]+)["']?\)/) || [])[1]
+          : null;
+        if (bgUrl) {
+          const safeBgUrl = bgUrl.replace(/"/g, "%22");
+          return (
+            `<span class="c-emoji c-emoji__medium c-emoji--inline" data-qa="emoji">` +
+            `<img src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7"` +
+            ` aria-label="${name} emoji" alt=":${name}:" data-stringify-type="emoji" data-stringify-emoji=":${name}:"` +
+            ` style="background-image: url(&quot;${safeBgUrl}&quot;);" class="emoji">` +
+            `</span>`
+          );
+        }
+        return match;
+      });
       return s;
     }
   }
@@ -807,6 +846,14 @@
         margin: 0 !important;
         text-align: left !important;
       }
+      .slack-utils--preview-panel img.emoji {
+        width: 22px;
+        height: 22px;
+        vertical-align: middle;
+        background-size: contain;
+        background-repeat: no-repeat;
+        background-position: center;
+      }
       .slack-utils--preview-label {
         font-size: 12px;
         color: #e8912d;
@@ -841,10 +888,28 @@
         lines.push(child.textContent);
       } else if (child.nodeType === Node.ELEMENT_NODE) {
         // Each <p> or block-level element is a line
-        lines.push(child.textContent);
+        lines.push(extractLineText(child));
       }
     }
     return lines.join("\n");
+  }
+
+  // Extract text from a single line element, converting emoji img to :name: form.
+  function extractLineText(el) {
+    let text = "";
+    for (const node of el.childNodes) {
+      if (node.nodeType === Node.TEXT_NODE) {
+        text += node.textContent;
+      } else if (node.nodeType === Node.ELEMENT_NODE) {
+        // Quill editor emoji: <img class="emoji" data-id=":smile:" data-stringify-text=":smile:" style="background-image: url(...)">
+        if (node.tagName === "IMG" && node.classList.contains("emoji")) {
+          text += node.getAttribute("data-stringify-text") || node.getAttribute("data-id") || "";
+        } else {
+          text += extractLineText(node);
+        }
+      }
+    }
+    return text;
   }
 
   function armComposer(composer) {
@@ -857,7 +922,7 @@
     const text = extractEditorText(editor);
     const panel = document.createElement("div");
     panel.className = "slack-utils--preview-panel";
-    panel.innerHTML = renderSlackMarkdown(text);
+    panel.innerHTML = renderSlackMarkdown(text, editor);
 
     // Create label
     const label = document.createElement("div");
