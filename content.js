@@ -730,6 +730,22 @@
     }
 
     function inlineFormat(s) {
+      // Mention: @name
+      s = s.replace(/@([\w.-]+(?:\s[\w.-]+)?)/g, (match) => {
+        return (
+          '<span role="presentation"><a class="c-link c-member_slug c-member_slug--light c-member_slug--link c-member_slug--mention"' +
+          ' data-stringify-type="mention" tabindex="0">' +
+          match + '</a></span>'
+        );
+      });
+      // Channel: #name
+      s = s.replace(/#([\w-]+)/g, (match) => {
+        return (
+          '<span role="presentation"><a class="c-link c-mrkdwn__channel c-member_slug c-member_slug--link"' +
+          ' data-stringify-type="channel">' +
+          match + '</a></span>'
+        );
+      });
       // Inline code: `code`
       s = s.replace(
         /`([^`]+)`/g,
@@ -780,6 +796,16 @@
       .slack-utils--preview-panel * {
         cursor: default !important;
         user-select: text !important;
+      }
+      .slack-utils--preview-panel .p-rich_text_list {
+        padding: 0 0 0 1.5em !important;
+        margin: 0 !important;
+        text-align: left !important;
+      }
+      .slack-utils--preview-panel .p-rich_text_list li {
+        padding: 0 !important;
+        margin: 0 !important;
+        text-align: left !important;
       }
       .slack-utils--preview-label {
         font-size: 12px;
