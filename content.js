@@ -42,6 +42,11 @@
       return "";
     }
 
+    // Emoji
+    if (el.matches('[data-stringify-type="emoji"]')) {
+      return el.getAttribute("data-stringify-emoji") || el.getAttribute("alt") || el.textContent;
+    }
+
     // Inline code
     if (el.matches('code.c-mrkdwn__code, [data-stringify-type="code"]')) {
       return "`" + el.textContent + "`";
