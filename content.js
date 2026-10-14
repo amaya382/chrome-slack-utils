@@ -559,68 +559,202 @@
     }
   });
 
-  // Render Slack-flavored Markdown text to HTML matching Slack's actual
-  // rendered message structure (see reference/redered.html).
-  function renderSlackMarkdown(text, editorEl) {
-    const esc = (s) =>
-      s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  // Rich elements in the editor (mentions, emoji, links) and already-parsed
+  // inline tokens are swapped for private-use placeholders, so the markup
+  // parser treats them as opaque characters and cannot break their HTML.
+  const ATOM_OPEN = "";
+  const ATOM_CLOSE = "";
 
+  function createAtomStore() {
+    const atoms = [];
+    const atomRe = /(\d+)/g;
+    return {
+      add(html) {
+        atoms.push(html);
+        return ATOM_OPEN + (atoms.length - 1) + ATOM_CLOSE;
+      },
+      restore(s) {
+        // Atoms can nest (e.g. a mention inside link text)
+        while (s.includes(ATOM_OPEN)) {
+          s = s.replace(atomRe, (_, n) => atoms[n]);
+        }
+        return s;
+      },
+    };
+  }
+
+  const escapeHtml = (s) =>
+    s
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
+
+  const SAFE_URL_RE = /^(?:https?:|mailto:)/i;
+
+  function renderLink(url, innerHtml) {
+    const href = escapeHtml(url);
+    return (
+      `<a target="_blank" class="c-link" data-stringify-link="${href}" href="${href}"` +
+      ` rel="noopener noreferrer">${innerHtml}</a>`
+    );
+  }
+
+  // The editor marks resolved users, user groups, broadcasts and channels
+  // alike as <ts-mention>, carrying the same c-member_slug classes Slack
+  // uses for the sent message.
+  function renderMention(el) {
+    const label = el.getAttribute("data-label") || el.textContent;
+    const classes = [...el.classList]
+      .filter((c) => c === "c-link" || c.startsWith("c-member_slug"))
+      .join(" ");
+    return `<span class="c-link ${classes}">${escapeHtml(label)}</span>`;
+  }
+
+  function renderEmoji(img) {
+    const name = img.getAttribute("data-stringify-text") || img.getAttribute("data-id") || "";
+    const bgUrl = (img.style.backgroundImage.match(/url\(["']?([^"')]+)["']?\)/) || [])[1];
+    if (!bgUrl) return escapeHtml(name);
+    const label = escapeHtml(name.replace(/^:|:$/g, ""));
+    return (
+      `<span class="c-emoji c-emoji__medium c-emoji--inline" data-qa="emoji">` +
+      `<img src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7"` +
+      ` aria-label="${label} emoji" alt="${escapeHtml(name)}" data-stringify-type="emoji"` +
+      ` style="background-image: url(&quot;${escapeHtml(bgUrl)}&quot;);" class="emoji">` +
+      `</span>`
+    );
+  }
+
+  // Convert the editor DOM into Slack markup text, one line per block.
+  function editorToMarkup(editor, atoms) {
+    const lines = [];
+    for (const child of editor.childNodes) {
+      // Quill renders an empty line as <p><br></p>
+      lines.push(inlineToMarkup(child, atoms).replace(/\n$/, ""));
+    }
+    return lines.join("\n");
+  }
+
+  function inlineToMarkup(node, atoms) {
+    if (node.nodeType === Node.TEXT_NODE) return node.textContent;
+    if (node.nodeType !== Node.ELEMENT_NODE) return "";
+    if (node.tagName === "TS-MENTION") return atoms.add(renderMention(node));
+    if (node.tagName === "IMG" && node.classList.contains("emoji")) {
+      return atoms.add(renderEmoji(node));
+    }
+    if (node.tagName === "BR") return "\n";
+    if (node.tagName === "A") {
+      const href = node.getAttribute("href") || "";
+      if (SAFE_URL_RE.test(href)) {
+        return atoms.add(renderLink(href, escapeHtml(node.textContent)));
+      }
+    }
+    let text = "";
+    for (const child of node.childNodes) text += inlineToMarkup(child, atoms);
+    return text;
+  }
+
+  // Code spans and links are tokenized in a single pass so that formatting
+  // characters inside them (e.g. `_` or `#` in a URL) are left untouched.
+  const INLINE_TOKEN_RE = new RegExp(
+    [
+      /`([^`\n]+)`/.source,
+      /\[([^\]\n]+)\]\(((?:https?:\/\/|mailto:)[^\s)]+)\)/.source,
+      /<((?:https?:\/\/|mailto:)[^|>\s]+)(?:\|([^>\n]+))?>/.source,
+      /(?<![\w\/])(https?:\/\/[^\s<>]*[^\s<>.,;:!?'")\]])/.source,
+    ].join("|"),
+    "g"
+  );
+
+  // Slack only treats a marker as formatting at word boundaries,
+  // so snake_case or 2*3*4 stays as typed.
+  const emphasisRe = (m) =>
+    new RegExp(`(^|[^\\w${m}])${m}(?=\\S)([^${m}\\n]*?\\S)${m}(?![\\w${m}])`, "g");
+  const BOLD_RE = emphasisRe("\\*");
+  const ITALIC_RE = emphasisRe("_");
+  const STRIKE_RE = emphasisRe("~");
+
+  function renderInline(raw, atoms) {
+    const tokenized = raw.replace(
+      INLINE_TOKEN_RE,
+      (m, code, linkText, linkUrl, angleUrl, angleText, bareUrl) => {
+        if (code !== undefined) {
+          return atoms.add(
+            `<code data-stringify-type="code" class="c-mrkdwn__code">${escapeHtml(code)}</code>`
+          );
+        }
+        if (linkUrl !== undefined) {
+          return atoms.add(renderLink(linkUrl, renderInline(linkText, atoms)));
+        }
+        if (angleUrl !== undefined) {
+          return atoms.add(renderLink(angleUrl, escapeHtml(angleText ?? angleUrl)));
+        }
+        return atoms.add(renderLink(bareUrl, escapeHtml(bareUrl)));
+      }
+    );
+    return escapeHtml(tokenized)
+      .replace(BOLD_RE, '$1<b data-stringify-type="bold">$2</b>')
+      .replace(ITALIC_RE, '$1<i data-stringify-type="italic">$2</i>')
+      .replace(STRIKE_RE, '$1<s data-stringify-type="strike">$2</s>');
+  }
+
+  // Render Slack markup text to HTML matching Slack's rendered message structure.
+  function renderSlackMarkdown(text, atoms) {
     const lines = text.split("\n");
     const parts = []; // collected into one p-rich_text_block
     let i = 0;
 
+    const FENCE = "```";
+
     while (i < lines.length) {
       const line = lines[i];
 
-      // Code block (```)
-      if (line.trimStart().startsWith("\u0060\u0060\u0060")) {
-        const codeLines = [];
-        i++;
-        while (
-          i < lines.length &&
-          !lines[i].trimStart().startsWith("\u0060\u0060\u0060")
-        ) {
-          codeLines.push(esc(lines[i]));
-          i++;
+      // Code block (```...```), which may open and close on the same line
+      if (line.trimStart().startsWith(FENCE)) {
+        const rest = lines.slice(i).join("\n");
+        const start = rest.indexOf(FENCE);
+        const end = rest.indexOf(FENCE, start + FENCE.length);
+        if (end !== -1) {
+          const code = rest
+            .slice(start + FENCE.length, end)
+            .replace(/^\n/, "")
+            .replace(/\n$/, "");
+          parts.push(
+            '<pre class="c-mrkdwn__pre" data-stringify-type="pre">' +
+              '<div class="p-rich_text_block--no-overflow">' +
+              escapeHtml(code) +
+              "</div></pre>"
+          );
+          const after = rest.slice(end + FENCE.length).replace(/^\n/, "");
+          lines.splice(i, lines.length - i, ...(after ? after.split("\n") : []));
+          continue;
         }
-        i++; // skip closing ```
-        parts.push(
-          '<pre class="c-mrkdwn__pre" data-stringify-type="pre">' +
-            '<div class="p-rich_text_block--no-overflow">' +
-            codeLines.join("\n") +
-            "</div></pre>"
-        );
-        continue;
       }
 
-      // Blockquote (> ...)
-      if (line.startsWith("> ") || line === ">") {
+      // Blockquote: >>> quotes the rest of the message, > a single line
+      if (line.startsWith(">")) {
         const quoteLines = [];
-        while (
-          i < lines.length &&
-          (lines[i].startsWith("> ") || lines[i] === ">")
-        ) {
-          quoteLines.push(lines[i].replace(/^> ?/, ""));
-          i++;
+        if (line.startsWith(">>>")) {
+          quoteLines.push(line.slice(3).replace(/^ /, ""), ...lines.slice(i + 1));
+          i = lines.length;
+        } else {
+          while (i < lines.length && lines[i].startsWith(">")) {
+            quoteLines.push(lines[i].replace(/^> ?/, ""));
+            i++;
+          }
         }
         parts.push(
           '<blockquote type="cite" class="c-mrkdwn__quote" data-stringify-type="quote">' +
             quoteLines
-              .map((l) => inlineFormat(esc(l)))
+              .map((l) => renderInline(l, atoms))
               .join('<br aria-hidden="true">') +
             "</blockquote>"
         );
         continue;
       }
 
-      // Unordered list (- item or • item)
-      if (/^(\s*)[-•*] /.test(line)) {
-        parts.push(parseList(lines));
-        continue;
-      }
-
-      // Ordered list (1. item)
-      if (/^(\s*)\d+\. /.test(line)) {
+      // Lists (- item, • item, * item, 1. item)
+      if (/^(\s*)([-•*]|\d+\.) /.test(line)) {
         parts.push(parseList(lines));
         continue;
       }
@@ -639,20 +773,20 @@
       // Normal text section
       parts.push(
         '<div class="p-rich_text_section">' +
-          inlineFormat(esc(line)) +
+          renderInline(line, atoms) +
           '<br aria-hidden="true"></div>'
       );
       i++;
     }
 
-    return (
+    return atoms.restore(
       '<div class="c-message_kit__blocks c-message_kit__blocks--rich_text">' +
-      '<div class="c-message__message_blocks c-message__message_blocks--rich_text">' +
-      '<div class="p-block_kit_renderer">' +
-      '<div class="p-block_kit_renderer__block_wrapper p-block_kit_renderer__block_wrapper--first">' +
-      '<div class="p-rich_text_block" dir="auto">' +
-      parts.join("") +
-      "</div></div></div></div></div>"
+        '<div class="c-message__message_blocks c-message__message_blocks--rich_text">' +
+        '<div class="p-block_kit_renderer">' +
+        '<div class="p-block_kit_renderer__block_wrapper p-block_kit_renderer__block_wrapper--first">' +
+        '<div class="p-rich_text_block" dir="auto">' +
+        parts.join("") +
+        "</div></div></div></div></div>"
     );
 
     // Parse a list block (unordered or ordered) with nesting support.
@@ -686,6 +820,9 @@
         if (!lt) break;
         // Stop if we return to a shallower indent than the block started at
         if (lineIndent(allLines[i]) < baseIndent) break;
+        // A different list type at the top level starts a separate list
+        if (lineIndent(allLines[i]) === baseIndent && items.length > 0 &&
+            lt !== items[0].type) break;
         items.push({
           indent: lineIndent(allLines[i]),
           type: lt,
@@ -726,7 +863,7 @@
 
         html +=
           `<li data-stringify-indent="${item.indent}" data-stringify-border="0">` +
-          inlineFormat(esc(item.content));
+          renderInline(item.content, atoms);
 
         // Collect child items (deeper indent)
         const childStart = j + 1;
@@ -734,7 +871,7 @@
           // Find extent of this child group
           let k = childStart;
           while (k < items.length && items[k].indent > item.indent) k++;
-          html += buildNestedList(items, childStart, item.type);
+          html += buildNestedList(items, childStart);
           j = k;
         } else {
           j++;
@@ -746,71 +883,60 @@
       html += `</${tag}>`;
       return html;
     }
+  }
 
-    function inlineFormat(s) {
-      // Mention: @name
-      s = s.replace(/@([\w.-]+(?:\s[\w.-]+)?)/g, (match) => {
-        return (
-          '<span role="presentation"><a class="c-link c-member_slug c-member_slug--light c-member_slug--link c-member_slug--mention"' +
-          ' data-stringify-type="mention" tabindex="0">' +
-          match + '</a></span>'
-        );
-      });
-      // Channel: #name
-      s = s.replace(/#([\w-]+)/g, (match) => {
-        return (
-          '<span role="presentation"><a class="c-link c-mrkdwn__channel c-member_slug c-member_slug--link"' +
-          ' data-stringify-type="channel">' +
-          match + '</a></span>'
-        );
-      });
-      // Inline code: `code`
-      s = s.replace(
-        /`([^`]+)`/g,
-        '<code data-stringify-type="code" class="c-mrkdwn__code">$1</code>'
-      );
-      // Bold: *text*
-      s = s.replace(/\*([^*]+)\*/g, "<b>$1</b>");
-      // Italic: _text_
-      s = s.replace(
-        /(?<![a-zA-Z0-9])_([^_]+)_(?![a-zA-Z0-9])/g,
-        "<i>$1</i>"
-      );
-      // Strikethrough: ~text~
-      s = s.replace(/~([^~]+)~/g, "<s>$1</s>");
-      // Links: [text](url)
-      s = s.replace(
-        /\[([^\]]+)\]\(([^)]+)\)/g,
-        '<a target="_blank" class="c-link" data-stringify-link="$2" href="$2" rel="noopener noreferrer">$1</a>'
-      );
-      // Bare URLs
-      s = s.replace(
-        /(?<![="'\w])(https?:\/\/[^\s<]+)/g,
-        '<a target="_blank" class="c-link" data-stringify-link="$1" href="$1" rel="noopener noreferrer">$1</a>'
-      );
-      // Emoji: :emoji_name: — must run last so generated HTML is not re-processed
-      s = s.replace(/:([a-z0-9_+\-]+):/g, (match, name) => {
-        const scope = editorEl || document;
-        const editorImg = scope.querySelector(
-          `img.emoji[data-id=":${name}:"], img.emoji[data-stringify-text=":${name}:"]`
-        );
-        const bgUrl = editorImg
-          ? (editorImg.style.backgroundImage.match(/url\(["']?([^"')]+)["']?\)/) || [])[1]
-          : null;
-        if (bgUrl) {
-          const safeBgUrl = bgUrl.replace(/"/g, "%22");
-          return (
-            `<span class="c-emoji c-emoji__medium c-emoji--inline" data-qa="emoji">` +
-            `<img src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7"` +
-            ` aria-label="${name} emoji" alt=":${name}:" data-stringify-type="emoji" data-stringify-emoji=":${name}:"` +
-            ` style="background-image: url(&quot;${safeBgUrl}&quot;);" class="emoji">` +
-            `</span>`
-          );
+  const DRAFT_FILE_SELECTOR = ".p-multi_file_upload__file_container";
+  const DRAFT_UNFURL_SELECTOR = ".p-draft_unfurls__unfurl";
+
+  function findAttachments(composer) {
+    const container = composer.closest(".c-wysiwyg_container");
+    if (!container) return { files: [], unfurls: [] };
+    return {
+      files: [...container.querySelectorAll(DRAFT_FILE_SELECTOR)],
+      unfurls: [...container.querySelectorAll(DRAFT_UNFURL_SELECTOR)],
+    };
+  }
+
+  function renderAttachments(composer) {
+    const { files, unfurls } = findAttachments(composer);
+    if (files.length === 0 && unfurls.length === 0) return null;
+
+    const root = document.createElement("div");
+    root.className = "slack-utils--preview-attachments";
+
+    for (const file of files) {
+      const name = file.querySelector('[role="group"]')?.getAttribute("aria-label") || "";
+      const thumb = file.querySelector(".p-file_thumbnail__container--image img");
+      if (thumb) {
+        const img = document.createElement("img");
+        img.className = "slack-utils--preview-image";
+        img.src = thumb.currentSrc || thumb.src;
+        img.alt = name;
+        img.title = name;
+        root.appendChild(img);
+      } else {
+        const chip = document.createElement("div");
+        chip.className = "slack-utils--preview-file";
+        chip.textContent = "\u{1F4CE} " + (name || "file");
+        const type = file
+          .querySelector('[data-qa="file-entity-metadata-description"]')
+          ?.textContent.trim();
+        if (type) {
+          const typeEl = document.createElement("span");
+          typeEl.className = "slack-utils--preview-file-type";
+          typeEl.textContent = type;
+          chip.appendChild(typeEl);
         }
-        return match;
-      });
-      return s;
+        root.appendChild(chip);
+      }
     }
+
+    // Unfurl cards reuse Slack's own markup and styles
+    for (const unfurl of unfurls) {
+      root.appendChild(unfurl.cloneNode(true));
+    }
+
+    return root;
   }
 
   function injectSendConfirmStyles() {
@@ -854,6 +980,40 @@
         background-repeat: no-repeat;
         background-position: center;
       }
+      .slack-utils--preview-attachments {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: flex-start;
+        gap: 8px;
+        margin-top: 8px;
+      }
+      .slack-utils--preview-attachments > * {
+        flex: none;
+      }
+      .slack-utils--preview-image {
+        width: auto !important;
+        height: auto !important;
+        max-width: 240px;
+        max-height: 160px;
+        border-radius: 8px;
+        border: 1px solid rgba(29, 28, 29, 0.13);
+        object-fit: contain;
+      }
+      .slack-utils--preview-file {
+        padding: 8px 12px;
+        border-radius: 8px;
+        border: 1px solid rgba(29, 28, 29, 0.13);
+        background: #fff;
+        font-size: 13px;
+        max-width: 260px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .slack-utils--preview-file-type {
+        color: rgba(29, 28, 29, 0.7);
+        margin-left: 8px;
+      }
       .slack-utils--preview-label {
         font-size: 12px;
         color: #e8912d;
@@ -879,37 +1039,21 @@
     return !!composer.closest('[data-qa="message_editor"]');
   }
 
-  // Extract text from the editor DOM, preserving line breaks.
-  // Slack's Quill editor uses <p> elements for each line.
-  function extractEditorText(editor) {
-    const lines = [];
-    for (const child of editor.childNodes) {
-      if (child.nodeType === Node.TEXT_NODE) {
-        lines.push(child.textContent);
-      } else if (child.nodeType === Node.ELEMENT_NODE) {
-        // Each <p> or block-level element is a line
-        lines.push(extractLineText(child));
-      }
-    }
-    return lines.join("\n");
+  function hasDraftContent(composer, editor) {
+    return (
+      editor.textContent.trim() !== "" ||
+      !!editor.querySelector("ts-mention, img.emoji") ||
+      findAttachments(composer).files.length > 0
+    );
   }
 
-  // Extract text from a single line element, converting emoji img to :name: form.
-  function extractLineText(el) {
-    let text = "";
-    for (const node of el.childNodes) {
-      if (node.nodeType === Node.TEXT_NODE) {
-        text += node.textContent;
-      } else if (node.nodeType === Node.ELEMENT_NODE) {
-        // Quill editor emoji: <img class="emoji" data-id=":smile:" data-stringify-text=":smile:" style="background-image: url(...)">
-        if (node.tagName === "IMG" && node.classList.contains("emoji")) {
-          text += node.getAttribute("data-stringify-text") || node.getAttribute("data-id") || "";
-        } else {
-          text += extractLineText(node);
-        }
-      }
-    }
-    return text;
+  // Attachments live outside the editor and change without input events,
+  // so they are part of the snapshot too.
+  function draftSnapshot(composer, editor) {
+    const fileNames = findAttachments(composer).files.map(
+      (f) => f.querySelector('[role="group"]')?.getAttribute("aria-label") || ""
+    );
+    return editor.innerHTML + "\0" + fileNames.join("\0");
   }
 
   function armComposer(composer) {
@@ -918,11 +1062,12 @@
     const editor = findEditor(composer);
     if (!editor) return;
 
-    // Extract text preserving line breaks, then render as Slack-styled HTML
-    const text = extractEditorText(editor);
+    const atoms = createAtomStore();
     const panel = document.createElement("div");
     panel.className = "slack-utils--preview-panel";
-    panel.innerHTML = renderSlackMarkdown(text, editor);
+    panel.innerHTML = renderSlackMarkdown(editorToMarkup(editor, atoms), atoms);
+    const attachments = renderAttachments(composer);
+    if (attachments) panel.appendChild(attachments);
 
     // Create label
     const label = document.createElement("div");
@@ -946,7 +1091,7 @@
 
     sendConfirmState.set(composer, {
       armed: true,
-      contentSnapshot: text,
+      contentSnapshot: draftSnapshot(composer, editor),
       previewElement: wrapper,
     });
   }
@@ -1003,7 +1148,7 @@
       if (isEditMode(composer)) return;
 
       // Skip empty messages
-      if (editor.textContent.trim() === "") return;
+      if (!hasDraftContent(composer, editor)) return;
 
       const state = sendConfirmState.get(composer);
 
@@ -1014,7 +1159,7 @@
         armComposer(composer);
       } else {
         // Second press: check if content changed
-        if (extractEditorText(editor) !== state.contentSnapshot) {
+        if (draftSnapshot(composer, editor) !== state.contentSnapshot) {
           // Content changed: disarm and block
           e.preventDefault();
           e.stopImmediatePropagation();
@@ -1044,7 +1189,7 @@
     if (!editor) return;
 
     // Skip empty messages
-    if (editor.textContent.trim() === "") return;
+    if (!hasDraftContent(composer, editor)) return;
 
     const state = sendConfirmState.get(composer);
 
@@ -1055,7 +1200,7 @@
       e.stopImmediatePropagation();
       armComposer(composer);
     } else {
-      if (editor.textContent !== state.contentSnapshot) {
+      if (draftSnapshot(composer, editor) !== state.contentSnapshot) {
         // Content changed: disarm and block
         e.preventDefault();
         e.stopPropagation();
