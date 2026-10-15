@@ -15,3 +15,25 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
     });
   }
 });
+
+// Redirect workspace archive links past the "open in the app" page
+const OPEN_IN_BROWSER_RULESET = "open_in_browser";
+
+function syncOpenInBrowser() {
+  chrome.storage.sync.get({ openInBrowserEnabled: true }, (data) => {
+    chrome.declarativeNetRequest.updateEnabledRulesets(
+      data.openInBrowserEnabled
+        ? { enableRulesetIds: [OPEN_IN_BROWSER_RULESET] }
+        : { disableRulesetIds: [OPEN_IN_BROWSER_RULESET] }
+    );
+  });
+}
+
+// The enabled rulesets reset to the manifest default on every extension update
+chrome.runtime.onInstalled.addListener(syncOpenInBrowser);
+chrome.runtime.onStartup.addListener(syncOpenInBrowser);
+chrome.storage.onChanged.addListener((changes) => {
+  if (changes.openInBrowserEnabled) {
+    syncOpenInBrowser();
+  }
+});

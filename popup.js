@@ -1,9 +1,16 @@
-const sendPreviewCheckbox = document.getElementById("sendPreview");
+const toggles = [
+  { id: "sendPreview", key: "sendPreviewEnabled" },
+  { id: "openInBrowser", key: "openInBrowserEnabled" },
+];
 
-chrome.storage.sync.get({ sendPreviewEnabled: true }, (data) => {
-  sendPreviewCheckbox.checked = data.sendPreviewEnabled;
-});
+for (const { id, key } of toggles) {
+  const checkbox = document.getElementById(id);
 
-sendPreviewCheckbox.addEventListener("change", () => {
-  chrome.storage.sync.set({ sendPreviewEnabled: sendPreviewCheckbox.checked });
-});
+  chrome.storage.sync.get({ [key]: true }, (data) => {
+    checkbox.checked = data[key];
+  });
+
+  checkbox.addEventListener("change", () => {
+    chrome.storage.sync.set({ [key]: checkbox.checked });
+  });
+}

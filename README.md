@@ -4,7 +4,7 @@
 
 <p align="center">
   <strong>Small utilities for Slack in Chrome.</strong><br/>
-  Copy messages as Markdown, and preview a message before it is sent.
+  Copy messages as Markdown, preview a message before it is sent, and open Slack links in the browser.
 </p>
 
 Slack Utils is a Manifest V3 Chrome extension written in plain JavaScript. There is no build step: the repository directory is the extension.
@@ -13,7 +13,7 @@ Slack Utils is a Manifest V3 Chrome extension written in plain JavaScript. There
 
 - **Built into Slack's own UI** — the copy commands appear in Slack's message menu, and the preview appears right above the message input
 - **Preview that looks like the sent message** — the preview is drawn with Slack's own rendering classes, and mentions follow what the message input has recognized
-- **Small surface** — the extension runs only on `app.slack.com`, requests three permissions, and sends no network requests of its own
+- **Small surface** — the extension runs only on Slack's own domains and sends no network requests of its own
 
 ## 🚀 Quick Start
 
@@ -58,6 +58,10 @@ The preview is skipped for `Shift` + `Enter` (a new line), while an autocomplete
 
 <img src="./img/preview.png" width="60%">
 
+### Open Links in Browser
+
+Opening a message link such as `https://<workspace>.slack.com/archives/...` normally shows a page that launches the Slack desktop app, along with the browser's "Open Slack.app?" dialog. The extension redirects these links to `https://<workspace>.slack.com/messages/...` before that page loads, so the message opens in Slack in the browser without the dialog.
+
 ## ⚙️ Configuration
 
 Click the extension's icon in the toolbar to open its popup.
@@ -65,15 +69,17 @@ Click the extension's icon in the toolbar to open its popup.
 | Setting | Default | Description |
 | --- | --- | --- |
 | Send preview | On | Show the preview on the first `Enter` |
+| Open links in browser | On | Open Slack message links in the browser instead of the desktop app |
 
-The setting is stored in `chrome.storage.sync`, so it follows the Chrome profile to every device signed in to it. Open Slack tabs pick up a change without a reload.
+Settings are stored in `chrome.storage.sync`, so it follows the Chrome profile to every device signed in to it. Open Slack tabs pick up a change without a reload.
 
 ## 🔒 Permissions
 
 - `clipboardWrite` — copy the converted Markdown
 - `contextMenus` — add "Copy selected as Markdown" to the right-click menu
-- `storage` — save and sync the setting
-- Access to `https://app.slack.com/*` — add the menu items and the preview to Slack
+- `storage` — save and sync the settings
+- `declarativeNetRequest` — redirect message links to the browser
+- Access to `https://*.slack.com/*` — add the menu items and the preview to Slack, and redirect message links on workspace domains
 
 ## 🔧 Troubleshooting
 
@@ -84,6 +90,10 @@ The extension works only on `https://app.slack.com/`, not in the Slack desktop a
 ### The preview does not appear
 
 Check that "Send preview" is on in the popup. The preview is also skipped while an autocomplete popup is open and while editing a sent message.
+
+### Message links still open the desktop app
+
+Check that "Open links in browser" is on in the popup. Only links to `https://<workspace>.slack.com/archives/...` are redirected.
 
 ### Formatting applied from the toolbar is missing in the preview
 
@@ -99,8 +109,9 @@ Slack Utils finds Slack's menus and message input by their DOM structure and cla
 | --- | --- |
 | `manifest.json` | Extension manifest |
 | `content.js` | Markdown conversion, menu items, and Send Preview on Slack pages |
-| `background.js` | Right-click menu entry |
-| `popup.html` / `popup.js` | Popup with the Send Preview toggle |
+| `background.js` | Right-click menu entry, and switching the redirect rule on and off |
+| `rules.json` | Redirect rule for Open Links in Browser |
+| `popup.html` / `popup.js` | Popup with the setting toggles |
 | `icons/` | Extension icons |
 | `img/` | Screenshots for this README |
 

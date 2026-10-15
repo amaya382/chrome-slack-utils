@@ -4,7 +4,7 @@
 
 <p align="center">
   <strong>Chrome で Slack を使うための小さなユーティリティ</strong><br/>
-  メッセージを Markdown でコピーし、送信前にメッセージを preview できる。
+  メッセージを Markdown でコピーし、送信前にメッセージを preview し、Slack のリンクをブラウザで開ける。
 </p>
 
 Slack Utils は plain JavaScript で書いた Manifest V3 の Chrome 拡張機能である。ビルドは不要で、リポジトリのディレクトリがそのまま拡張機能になる。
@@ -13,7 +13,7 @@ Slack Utils は plain JavaScript で書いた Manifest V3 の Chrome 拡張機�
 
 - **Slack の画面に組み込む** — コピーのコマンドは Slack のメッセージメニューに並び、preview は入力欄のすぐ上に出る
 - **送信後に近い見た目の preview** — preview は Slack 自身の表示用 class で描画し、メンションは入力欄が認識したとおりに表示する
-- **小さな機能範囲** — 動くのは `app.slack.com` の上だけで、要求する permission は 3 つ。拡張機能から独自に通信することはない
+- **小さな機能範囲** — 動くのは Slack のドメインの上だけで、拡張機能から独自に通信することはない
 
 ## 🚀 Quick Start
 
@@ -58,6 +58,10 @@ preview に出るもの：
 
 <img src="./img/preview.png" width="60%">
 
+### Open Links in Browser
+
+`https://<workspace>.slack.com/archives/...` のようなメッセージのリンクを開くと、通常は Slack のデスクトップアプリを起動するページと、ブラウザの「Open Slack.app?」ダイアログが出る。拡張機能はそのページを読み込む前にリンクを `https://<workspace>.slack.com/messages/...` へ転送するので、ダイアログを出さずにブラウザの Slack でメッセージが開く。
+
 ## ⚙️ Configuration
 
 ツールバーにある拡張機能のアイコンを押すと popup が開く。
@@ -65,6 +69,7 @@ preview に出るもの：
 | 設定 | 既定値 | 説明 |
 | --- | --- | --- |
 | Send preview | オン | 1 回目の `Enter` で preview を出す |
+| Open links in browser | オン | Slack のメッセージのリンクをデスクトップアプリではなくブラウザで開く |
 
 設定は `chrome.storage.sync` に保存するので、同じ Chrome プロファイルでログインしたすべての端末に同期される。開いている Slack のタブは、再読み込みしなくても変更を反映する。
 
@@ -73,7 +78,8 @@ preview に出るもの：
 - `clipboardWrite` — 変換した Markdown をコピーする
 - `contextMenus` — 右クリックメニューに「Copy selected as Markdown」を加える
 - `storage` — 設定を保存して同期する
-- `https://app.slack.com/*` へのアクセス — Slack にメニュー項目と preview を加える
+- `declarativeNetRequest` — メッセージのリンクをブラウザへ転送する
+- `https://*.slack.com/*` へのアクセス — Slack にメニュー項目と preview を加え、workspace のドメインでメッセージのリンクを転送する
 
 ## 🔧 Troubleshooting
 
@@ -84,6 +90,10 @@ preview に出るもの：
 ### preview が出ない
 
 popup で「Send preview」がオンになっているかを確かめる。補完のポップアップが開いている間と、送信済みメッセージの編集中も preview は出ない。
+
+### メッセージのリンクがデスクトップアプリで開く
+
+popup で「Open links in browser」がオンになっているかを確かめる。転送するのは `https://<workspace>.slack.com/archives/...` へのリンクだけである。
 
 ### ツールバーで付けた書式が preview に出ない
 
@@ -99,8 +109,9 @@ Slack Utils は、Slack のメニューと入力欄を DOM の構造と class �
 | --- | --- |
 | `manifest.json` | 拡張機能の manifest |
 | `content.js` | Slack のページでの Markdown 変換、メニュー項目、Send Preview |
-| `background.js` | 右クリックメニューの項目 |
-| `popup.html` / `popup.js` | Send Preview の切り替えを置いた popup |
+| `background.js` | 右クリックメニューの項目と、転送ルールの切り替え |
+| `rules.json` | Open Links in Browser の転送ルール |
+| `popup.html` / `popup.js` | 設定の切り替えを置いた popup |
 | `icons/` | 拡張機能のアイコン |
 | `img/` | この README のスクリーンショット |
 

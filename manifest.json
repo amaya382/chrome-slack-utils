@@ -3,7 +3,8 @@
   "name": "Slack Utils",
   "version": "1.0.0",
   "description": "Utility toolkit for Slack — enhances your Slack experience with handy features",
-  "permissions": ["clipboardWrite", "contextMenus", "storage"],
+  "permissions": ["clipboardWrite", "contextMenus", "storage", "declarativeNetRequest"],
+  "host_permissions": ["https://*.slack.com/*"],
   "action": {
     "default_popup": "popup.html",
     "default_icon": {
@@ -25,5 +26,10 @@
       "matches": ["https://app.slack.com/*"],
       "js": ["content.js"]
     }
-  ]
+  ],
+  "declarative_net_request": {
+    "rule_resources": [
+      { "id": "open_in_browser", "enabled": true, "path": "rules.json" }
+    ]
+  }
 }
