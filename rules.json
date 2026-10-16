@@ -10,5 +10,17 @@
       "regexFilter": "^https://([a-z0-9.-]+)\\.slack\\.com/archives/(.*)$",
       "resourceTypes": ["main_frame"]
     }
+  },
+  {
+    "id": 2,
+    "priority": 1,
+    "action": {
+      "type": "redirect",
+      "redirect": { "regexSubstitution": "https://\\1.slack.com/messages/\\2" }
+    },
+    "condition": {
+      "regexFilter": "^https://([a-z0-9.-]+)\\.slack\\.com/app_redirect\\?(?:[^#]*&)?channel=([A-Za-z0-9]+).*$",
+      "resourceTypes": ["main_frame"]
+    }
   }
 ]

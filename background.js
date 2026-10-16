@@ -16,7 +16,7 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
   }
 });
 
-// Redirect workspace archive links past the "open in the app" page
+// Redirect workspace message links past the "open in the app" page
 const OPEN_IN_BROWSER_RULESET = "open_in_browser";
 
 function syncOpenInBrowser() {

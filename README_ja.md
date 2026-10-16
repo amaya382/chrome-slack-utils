@@ -65,7 +65,7 @@ popup で「Send preview」がオンになっているかを確かめる。補�
 
 ### メッセージのリンクがデスクトップアプリで開く
 
-popup で「Open links in browser」がオンになっているかを確かめる。転送するのは `https://<workspace>.slack.com/archives/...` へのリンクだけである。
+popup で「Open links in browser」がオンになっているかを確かめる。転送するのは `https://<workspace>.slack.com/archives/...` と `https://<workspace>.slack.com/app_redirect?channel=...` へのリンクだけである。
 
 ### ツールバーで付けた書式が preview に出ない
 

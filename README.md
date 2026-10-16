@@ -65,7 +65,7 @@ Check that "Send preview" is on in the popup. The preview is also skipped while 
 
 ### Message links still open the desktop app
 
-Check that "Open links in browser" is on in the popup. Only links to `https://<workspace>.slack.com/archives/...` are redirected.
+Check that "Open links in browser" is on in the popup. Only links to `https://<workspace>.slack.com/archives/...` and `https://<workspace>.slack.com/app_redirect?channel=...` are redirected.
 
 ### Formatting applied from the toolbar is missing in the preview
 
